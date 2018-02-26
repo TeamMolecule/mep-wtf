@@ -12,19 +12,21 @@ import idautils
 from idaapi import o_reg, o_imm
 
 # Register mapping:
-# W12 = $0
+#--Scratch:
+# W4 = $0
 # W0  = $1
 # W1  = $2
 # W2  = $3
 # W3  = $4
-# W4  = $5
-# W5  = $6
-# W6  = $7
-# W7  = $8
-# W8  = $9
-# W9  = $10
-# W10 = $11
-# W11 = $12
+#--Preserved:
+# W19 = $5
+# W20 = $6
+# W21 = $7
+# W22 = $8
+# W23 = $9
+# W24 = $10
+# W25 = $11
+# W26 = $12
 # ?? = $13 - TP
 # ?? = $14 - GP
 # SP = $15 - SP
@@ -33,8 +35,8 @@ from idaapi import o_reg, o_imm
 
 output = []
 
-g_tmp = "W20" # TODO
-g_arm_rpc_reg = "W21"
+g_tmp = "W5" # TODO
+g_arm_rpc_reg = "W6"
 
 class mep:
     MEP_INSN_X_INVALID  = 1
@@ -299,14 +301,17 @@ def use_loc(addr):
 def arm_reg(num):
     # https://github.com/yifanlu/toshiba-mep-idp/blob/11082f689ed2cf0d6c0793beb84cff599de22a73/reg.cpp#L29
     if num == 1:
-        # map $0 to W12
-        return "W12"
+        # map $0 to W4
+        return "W4"
+    if num >= 2 and num <= 5:
+        # map $1-$4 to W0-W2
+        return "W{}".format(num - 2)
     if num == 16:
         # map $sp to SP
         return "SP"
-    if num >= 2 and num <= 13:
-        # map $1..$12 to W0..W11
-        return "W{}".format(num - 2)
+    if num >= 6 and num <= 13:
+        # map $5-$12 to W19-W26
+        return "W{}".format(num + 13)
 
     raise RuntimeError("reg #{} is not supported yet!".format(num))
 
@@ -860,7 +865,8 @@ def c_repeat(insn):
     assert insn.Op2.type == o_near
 
     rpe = idc.GetOperandValue(insn.ip, 1)
-    rpb = insn.ip
+    # Hack: works around us inserting an additional instruction here...
+    rpb = insn.ip + 4
     is_erepeat = False
 
     op1 = arm_reg(insn.Op1.reg)
@@ -963,6 +969,10 @@ def decompile(ea):
 
 
 decompile(ScreenEA())
+
+last = output[-1]
+if isinstance(last, Insn) and last.s.startswith("BR "):
+    last.s = "RET " + last.s[3:]
 
 s = ""
 for item in output:
