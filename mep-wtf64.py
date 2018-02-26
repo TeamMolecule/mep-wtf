@@ -1,3 +1,12 @@
+#
+# Copyright 2018 molecule. All rights reserved.
+#
+# This software is intellectual property of molecule.
+# You may not copy, republish, display, distribute, transmit, sell, rent, lease, loan
+# or otherwise make available in any form or by any means all or any portion of this software.
+#
+
+
 import idc
 import idautils
 from idaapi import o_reg, o_imm
@@ -324,10 +333,16 @@ def c_add3(addr):
         emit("add {}, {}, #0x{:X}".format(op1, op2, imm))
 
 
-def c_and(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    op2 = arm_reg(idc.GetOpnd(addr, 1))
-    emit("and {}, {}, {}".format(op1, op1, op2))
+def c_and(insn):
+    # GR(n) = GR(n) & GR(m);
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+    
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+
+    emit("AND {0}, {0}, {1}".format(op1, op2))
 
 
 def c_extuh(addr):
@@ -392,6 +407,18 @@ def c_sw_rm(insn):
     emit("STR {}, [{}]".format(op1, op2))
 
 
+def c_lw_sp(insn):
+    # GR(n) = Load4(GRN(sp) + disp7)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("LDR {}, [SP, #{}]".format(op1, imm))
+
+
 def c_sw_sp(insn):
     # Store4(GR(n), GRN(sp) + disp7)
 
@@ -416,17 +443,28 @@ def c_movh(insn):
     emit("LDR {}, =0x{:08X}".format(reg, imm << 16))
 
 
-def c_movu(addr):
-    reg = arm_reg(idc.GetOpnd(addr, 0))
-    value = idc.GetOperandValue(addr, 1)
+def c_movu(insn):
+    # GR(n) = imm16/imm24
 
-    emit("ldr {}, =0x{:08X}".format(reg, value))
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    reg = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("LDR {}, =0x{:08X}".format(reg, imm))
 
 
-def c_or(addr):
-    dst = arm_reg(idc.GetOpnd(addr, 0))
-    src = arm_reg(idc.GetOpnd(addr, 1))
-    emit("orr {}, {}, {}".format(dst, dst, src))
+def c_or(insn):
+    # GR(n) = GR(n) | GR(m)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+    
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+
+    emit("ORR {0}, {0}, {1}".format(op1, op2))
 
 
 def c_or3(insn):
@@ -472,14 +510,19 @@ def c_ret(insn):
     emit("RET")
 
 
-def c_jmp(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    emit("bx {}".format(op1))
+def c_jmp_rm(insn):
+    # BRA(GR(m) & 0xFFFFFFFE)
+
+    assert insn.Op1.type == o_reg
+
+    op1 = arm_reg64(insn.Op1.reg)
+
+    emit("BR {}".format(op1))
 
 
-def c_bsr(addr):
-    op1 = idc.GetOpnd(addr, 0)
-    emit("bl {}".format(op1))
+def c_bsr(insn):
+    op1 = idc.GetOpnd(insn.ip, 0)
+    emit("BL {}".format(op1))
 
 
 def c_ldc(insn):
@@ -509,87 +552,132 @@ def c_bnez(insn):
     emit("BNE {}".format(lbl))
 
 
-def c_beqz(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    lbl = convert_label(idc.GetOpnd(addr, 1))
-    emit("cmp {}, #0".format(op1))
-    emit("beq {}".format(lbl))
+def c_beqz(insn):
+    # if (GR(n) == 0) BRA(CRN(pc) + SignExt(disp8, 8, 32) - 2);
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_near
+
+    op1 = arm_reg(insn.Op1.reg)
+    lbl = use_loc(idc.GetOperandValue(insn.ip, 1))
+    emit("CMP {}, #0".format(op1))
+    emit("BEQ {}".format(lbl))
 
 
-def c_sltu3(addr):
-    dis = idc.GetDisasm(addr)
-    if "sltu3   $0," in dis:
-        op1 = arm_reg("$0")
-        op2 = arm_reg(idc.GetOpnd(addr, 0))
-        if "h" in idc.GetOpnd(addr, 1):
-            op3 = "#{}".format(idc.GetOperandValue(addr, 1))
-        else:
-            op3 = arm_reg(idc.GetOpnd(addr, 1))
+def c_bnei(insn):
+    # if (GR(n) != imm4) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4)
 
-        emit("cmp {}, {}".format(op2, op3))
-        emit("movhs {}, #0".format(op1)) # higher or same => 0
-        emit("movlo {}, #1".format(op1)) # strictly lower => 1
-    else:
-        op1 = arm_reg(idc.GetOpnd(addr, 0))
-        op2 = arm_reg(idc.GetOpnd(addr, 1))
-        imm = idc.GetOperandValue(addr, 2)
-        emit("cmp {}, #{}".format(op2, imm))
-        emit("movhs {}, #0".format(op1)) # higher or same => 0
-        emit("movlo {}, #1".format(op1)) # strictly lower => 1
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_near
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
+
+    emit("CMP {}, #{}".format(op1, imm))
+    emit("BNE {}".format(lbl))
 
 
-def c_sll(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    imm = idc.GetOperandValue(addr, 1)
-    emit("lsl {}, #{}".format(op1, imm))
+def c_bne(insn):
+    # if (GR(n) != GR(m)) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4);
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+    assert insn.Op3.type == o_near
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
+
+    emit("CMP {}, {}".format(op1, op2))
+    emit("BNE {}".format(lbl))
 
 
-def c_add(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    imm = idc.GetOperandValue(addr, 1)
-    emit("add {}, #0x{:x}".format(op1, imm))
+def c_blti(insn):
+    # if ((int32_t)GR(n) < (int32_t)imm4) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4);
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_near
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
+
+    emit("CMP {}, #{}".format(op1, imm))
+    emit("BLT {}".format(lbl))
 
 
-def c_bra(addr):
-    op = convert_label(idc.GetOpnd(addr, 0))
-    emit("b {}".format(op))
+def c_sltu3_imm16(insn):
+    # GR(n) = GR(m) < imm16
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+    assert insn.Op3.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+    imm = insn.Op3.value
+
+    emit("CMP {}, #{}".format(op2, imm))
+    emit("CSET {}, LO".format(op1))
 
 
-def c_srl(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    imm = idc.GetOperandValue(addr, 1)
-    emit("lsr {}, #{}".format(op1, imm))
+def c_sltu3_r0(insn):
+    # GRN(r0) = GR(n) < GR(m)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+
+    emit("CMP {}, {}".format(op1, op2))
+    emit("CSET W0, LO")
 
 
-def c_and3(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    op2 = arm_reg(idc.GetOpnd(addr, 1))
-    imm = idc.GetOperandValue(addr, 2)
-    emit("and {}, {}, #0x{:x}".format(op1, op2, imm))
+def c_sll_imm5(insn):
+    # GR(n) = GR(n) << Imm5
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("LSL {0}, {0}, #{1}".format(op1, imm))
 
 
-def c_bnei(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    imm = idc.GetOperandValue(addr, 1)
-    dst = idc.GetOperandValue(addr, 2)
-    emit("cmp {}, #{}".format(op1, imm))
-    emit("bne loc_{:X}".format(dst))
+def c_srl_imm5(insn):
+    # GR(n) = GR(n) >> Imm5
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("LSR {0}, {0}, #{1}".format(op1, imm))
 
 
-def c_bne(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    op2 = arm_reg(idc.GetOpnd(addr, 1))
-    dst = idc.GetOperandValue(addr, 2)
-    emit("cmp {}, {}".format(op1, op2))
-    emit("bne loc_{:X}".format(dst))
+def c_bra(insn):
+    op1 = use_loc(insn.Op1.addr)
+    emit("B {}".format(op1))
 
 
-def c_blti(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    imm = idc.GetOperandValue(addr, 1)
-    dst = idc.GetOperandValue(addr, 2)
-    emit("cmp {}, #{}".format(op1, imm))
-    emit("blo loc_{:X}".format(dst))
+def c_and3(insn):
+    # GR(n) = GR(m) & imm16
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+    assert insn.Op3.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+    imm = insn.Op3.value
+
+    emit("AND {}, {}, #{}".format(op1, op2, imm))
 
 
 def c_bgei(addr):
@@ -625,6 +713,13 @@ def c_extb(addr):
     emit("sxtb {0}, {0}".format(op1))
 
 
+def unsigned2signed32(val):
+    if val >= 2 ** 31:
+        val -= 2 ** 32
+
+    return val
+
+
 def c_add3_imm16(insn):
     # GR(n) = GR(m) + SignExt(i, 16, 32)
 
@@ -634,12 +729,47 @@ def c_add3_imm16(insn):
 
     op1 = arm_reg(insn.Op1.reg)
     op2 = arm_reg(insn.Op2.reg)
-    imm = insn.Op3.value
-
-    if imm >= 2 ** 31:
-        imm -= 2 ** 32
+    imm = unsigned2signed32(insn.Op3.value)
 
     emit("ADD {}, {}, #{}".format(op1, op2, imm))
+
+
+def c_add3_rl(insn):
+    # GR(l) = GR(n) + GR(m)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+    assert insn.Op3.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+    op3 = arm_reg(insn.Op3.reg)
+
+    emit("ADD {}, {}, {}".format(op1, op2, op3))
+
+
+def c_add3_sp(insn):
+    # GR(n) = imm7 + GRN(sp)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op3.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op3.value
+
+    emit("ADD {}, SP, #{}".format(op1, imm))
+
+
+def c_add(insn):
+    # GR(n) = GR(n) + SignExt(imm6, 6, 32)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = unsigned2signed32(insn.Op2.value)
+
+    emit("ADD {0}, {0}, #{1}".format(op1, imm))
 
 
 rpb = 0
@@ -657,18 +787,37 @@ def c_erepeat(insn):
 
 codegen = {
     mep.MEP_INSN_MOVH: c_movh,
+    mep.MEP_INSN_MOVU24: c_movu,
     mep.MEP_INSN_OR3: c_or3,
     mep.MEP_INSN_EREPEAT: c_erepeat,
     mep.MEP_INSN_LW: c_lw_rm,
     mep.MEP_INSN_SW: c_sw_rm,
+    mep.MEP_INSN_LW_SP: c_lw_sp,
     mep.MEP_INSN_SW_SP: c_sw_sp,
     mep.MEP_INSN_BNEZ: c_bnez,
+    mep.MEP_INSN_BEQZ: c_beqz,
     mep.MEP_INSN_MOV: c_mov_rm,
     mep.MEP_INSN_MOVI8: c_mov_imm8,
     mep.MEP_INSN_RET: c_ret,
     mep.MEP_INSN_ADD3X: c_add3_imm16,
     mep.MEP_INSN_LDC_LP: c_ldc,
     mep.MEP_INSN_LW16: c_lw_disp16,
+    mep.MEP_INSN_SLTU3X: c_sltu3_imm16,
+    mep.MEP_INSN_JMP: c_jmp_rm,
+    mep.MEP_INSN_BNEI: c_bnei,
+    mep.MEP_INSN_BNE: c_bne,
+    mep.MEP_INSN_BLTI: c_blti,
+    mep.MEP_INSN_BSR12: c_bsr,
+    mep.MEP_INSN_SLLI: c_sll_imm5,
+    mep.MEP_INSN_SRLI: c_srl_imm5,
+    mep.MEP_INSN_ADD: c_add,
+    mep.MEP_INSN_OR: c_or,
+    mep.MEP_INSN_AND: c_and,
+    mep.MEP_INSN_BRA: c_bra,
+    mep.MEP_INSN_ADD3: c_add3_rl,
+    mep.MEP_INSN_AND3: c_and3,
+    mep.MEP_INSN_ADD3I: c_add3_sp,
+    mep.MEP_INSN_SLTU3: c_sltu3_r0,
 }
 
 
@@ -723,9 +872,9 @@ for item in output:
     if isinstance(item, Loc) and item.s in used_locs:
         s += format_loc(item.s) + ":\n"
 
-print("-" * 80)
-print(s)
-print("-" * 80)
+# print("-" * 80)
+# print(s)
+# print("-" * 80)
 
 with open("F:/test.asm", "w") as fout:
     fout.write(s)
