@@ -9,33 +9,37 @@
 
 import idc
 import idautils
+import string
 from idaapi import o_reg, o_imm
 
 # Register mapping:
 #--Scratch:
 # W4 = $0
-# W0  = $1
-# W1  = $2
-# W2  = $3
-# W3  = $4
+# W0  = $1 (arg0)
+# W1  = $2 (arg1)
+# W2  = $3 (arg2)
+# W3  = $4 (arg3)
 #--Preserved:
 # W19 = $5
 # W20 = $6
 # W21 = $7
 # W22 = $8
-# W23 = $9
-# W24 = $10
-# W25 = $11
-# W26 = $12
-# ?? = $13 - TP
-# ?? = $14 - GP
-# SP = $15 - SP
+#--Scratch:
+# W9  = $9
+# W10 = $10
+# W11 = $11
+# W12 = $12
+#--Special:
+# W27 = $13 - TP
+# W28 = $14 - GP
+# SP  = $15 - SP
 
 # X30 (LR) = $lp
 
 output = []
 
 g_tmp = "W5" # TODO
+g_tmp64 = "X5"
 g_arm_rpc_reg = "W6"
 
 class mep:
@@ -300,6 +304,12 @@ def use_loc(addr):
 
 def arm_reg(num):
     # https://github.com/yifanlu/toshiba-mep-idp/blob/11082f689ed2cf0d6c0793beb84cff599de22a73/reg.cpp#L29
+    if num == 14:
+        # map $tp to W27
+        return "W27"
+    if num == 15:
+        # map $gp to W28
+        return "W28"
     if num == 1:
         # map $0 to W4
         return "W4"
@@ -309,9 +319,12 @@ def arm_reg(num):
     if num == 16:
         # map $sp to SP
         return "SP"
-    if num >= 6 and num <= 13:
-        # map $5-$12 to W19-W26
+    if num >= 6 and num <= 9:
+        # map $5-$8 to W19-W22
         return "W{}".format(num + 13)
+    if num >= 10 and num <= 13:
+        # map $9-$12 to W9-W12
+        return "W{}".format(num - 1)
 
     raise RuntimeError("reg #{} is not supported yet!".format(num))
 
@@ -323,6 +336,17 @@ def arm_reg64(num):
 def convert_label(lbl):
     # TODO: resolve the label to address
     return lbl.replace("locret", "loc")
+
+
+def unsigned2signed32(val):
+    if val >= 2 ** 31:
+        val -= 2 ** 32
+
+    return val
+
+
+def out_of_range(val):
+    return val >= 2 ** 11 or val <= -(2 ** 11)
 
 
 def c_and(insn):
@@ -337,28 +361,22 @@ def c_and(insn):
     emit("AND {0}, {0}, {1}".format(op1, op2))
 
 
-def c_extuh(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    emit("uxth {0}, {0}".format(op1))
+def c_xor(insn):
+    # GR(n) = GR(n) ^ GR(m)
 
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+    
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
 
-def c_sw(addr):
-    # TODO: sw_sp, sw_tp, sw_disp16, sw_abs24
-    dis = idc.GetDisasm(addr)
-    if "($sp)" in dis:
-        op1 = arm_reg(idc.GetOpnd(addr, 0))
-        disp = idc.GetOperandValue(addr, 1)
-        emit("str {}, [sp, #0x{:X}]".format(op1, disp))
-    elif not idc.GetOpnd(addr, 2):
-        src = arm_reg(idc.GetOpnd(addr, 0))
-        dst = arm_reg(idc.GetOpnd(addr, 1))
-        emit("str {}, [{}]".format(src, dst))
+    if op1 == "SP":
+        if op2 != "SP":
+            raise RuntimeError("tried to EOR SP, something...")
+        emit("MOV {}, #0".format(g_tmp))
+        emit("MOV SP, {}".format(g_tmp64))
     else:
-        # lw_disp16
-        dst = arm_reg(idc.GetOpnd(addr, 0))
-        disp = idc.GetOperandValue(addr, 1)
-        src = arm_reg(idc.GetOpnd(addr, 2))
-        emit("str {}, [{}, #0x{:X}]".format(dst, src, disp))
+        emit("EOR {0}, {0}, {1}".format(op1, op2))
 
 
 def c_lw_rm(insn):
@@ -373,6 +391,18 @@ def c_lw_rm(insn):
     emit("LDR {}, [{}]".format(op1, op2))
 
 
+def c_lb_rm(insn):
+    # GR(n) = SignExt(Load1(GR(m)), 8, 32)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg64(insn.Op2.reg)
+
+    emit("LDRSB {}, [{}]".format(op1, op2))
+
+
 def c_lw_disp16(insn):
     # GR(n) = Load4(GR(m) + SignExt(disp16, 16, 32))
 
@@ -381,10 +411,14 @@ def c_lw_disp16(insn):
     assert insn.Op3.type == o_reg
 
     op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
+    imm = unsigned2signed32(insn.Op2.value)
     op2 = arm_reg64(insn.Op3.reg)
 
-    emit("LDR {}, [{}, #{}]".format(op1, op2, imm))
+    if out_of_range(imm):
+        emit("LDR {}, ={}".format(g_tmp, imm))
+        emit("LDR {}, [{}, {}]".format(op1, op2, g_tmp64))
+    else:
+        emit("LDR {}, [{}, #{}]".format(op1, op2, imm))
 
 
 def c_sw_rm(insn):
@@ -399,6 +433,103 @@ def c_sw_rm(insn):
     emit("STR {}, [{}]".format(op1, op2))
 
 
+def c_sw_abs24(insn):
+    # Store4(GR(n), abs24)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_mem
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = insn.Op2.addr
+
+    emit("LDR {}, =0x{:X}".format(g_tmp, op2))
+    emit("STR {}, [{}]".format(op1, g_tmp64))
+
+
+def c_lw_abs24(insn):
+    # GR(n) = Load4(abs24)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_mem
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = insn.Op2.addr
+
+    emit("LDR {}, =0x{:X}".format(g_tmp, op2))
+    emit("LDR {}, [{}]".format(op1, g_tmp64))
+
+
+def c_sb(insn):
+    # Store1(GR(n), GR(m));
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg64(insn.Op2.reg)
+
+    emit("STRB {}, [{}]".format(op1, op2))
+
+
+def c_sh_rm(insn):
+    # Store1(GR(n), GR(m));
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg64(insn.Op2.reg)
+
+    emit("STRH {}, [{}]".format(op1, op2))
+
+
+def load_store_disp(asm, op1, op2, imm):
+    # Generates instruction: {asm} OP1, [OP2, #imm]
+    # with additional case when imm is out-of-range
+
+    if out_of_range(imm):
+        emit("LDR {}, ={}".format(g_tmp, imm))
+        emit("{} {}, [{}, {}]".format(asm, op1, op2, g_tmp64))
+    else:
+        emit("{} {}, [{}, #{}]".format(asm, op1, op2, imm))
+
+
+def c_sb_disp16(insn):
+    # Store1(GR(n), GR(m) + SignExt(disp16, 16, 32))
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_reg
+
+    load_store_disp("STRB", arm_reg(insn.Op1.reg), arm_reg64(insn.Op3.reg), insn.Op2.value)
+
+
+def c_lb_disp16(insn):
+    # GR(n) = SignExt(Load1(GRN(tp) + disp7), 8, 32)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_reg
+
+    load_store_disp("LDRSB", arm_reg(insn.Op1.reg), arm_reg64(insn.Op3.reg), insn.Op2.value)
+
+
+def c_sh_disp16(insn):
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_reg
+
+    load_store_disp("STRH", arm_reg(insn.Op1.reg), arm_reg64(insn.Op3.reg), insn.Op2.value)
+
+
+def c_lh_disp16(insn):
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_reg
+
+    load_store_disp("LDRSH", arm_reg(insn.Op1.reg), arm_reg64(insn.Op3.reg), insn.Op2.value)
+
+
 def c_lw_sp(insn):
     # GR(n) = Load4(GRN(sp) + disp7)
 
@@ -408,7 +539,11 @@ def c_lw_sp(insn):
     op1 = arm_reg(insn.Op1.reg)
     imm = insn.Op2.value
 
-    emit("LDR {}, [SP, #{}]".format(op1, imm))
+    if op1 == "SP":
+        emit("LDR {}, [SP, #{}]".format(g_tmp, imm))
+        emit("MOV SP, {}".format(g_tmp64))
+    else:
+        emit("LDR {}, [SP, #{}]".format(op1, imm))
 
 
 def c_sw_sp(insn):
@@ -423,6 +558,24 @@ def c_sw_sp(insn):
     emit("STR {}, [SP, #{}]".format(op1, imm))
 
 
+def c_sw_disp16(insn):
+    # Store4(GR(n), GR(m) + SignExt(disp16, 16, 32))
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+    op2 = arm_reg64(insn.Op3.reg)
+
+    if out_of_range(imm):
+        emit("LDR {}, ={}".format(g_tmp, imm))
+        emit("STR {}, [{}, {}]".format(op1, op2, g_tmp64))
+    else:
+        emit("STR {}, [{}, #{}]".format(op1, op2, imm))
+
+
 def c_movh(insn):
     # GR(n) = imm16 << 16
 
@@ -432,17 +585,24 @@ def c_movh(insn):
     reg = arm_reg(insn.Op1.reg)
     imm = insn.Op2.value
 
-    emit("LDR {}, =0x{:08X}".format(reg, imm << 16))
+    if reg == "SP":
+        emit("LDR {}, =0x{:08X}".format(g_tmp, imm << 16))
+        emit("MOV SP, {}".format(g_tmp64))
+    else:
+        emit("LDR {}, =0x{:08X}".format(reg, imm << 16))
 
 
 def c_movu(insn):
     # GR(n) = imm16/imm24
 
     assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
+    assert insn.Op2.type == o_imm or insn.Op2.type == o_mem
 
     reg = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
+    if insn.Op2.type == o_imm:
+        imm = insn.Op2.value
+    else:
+        imm = insn.Op2.addr
 
     emit("LDR {}, =0x{:08X}".format(reg, imm))
 
@@ -480,8 +640,8 @@ def c_mov_rm(insn):
     assert insn.Op1.type == o_reg
     assert insn.Op2.type == o_reg
 
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
+    op1 = arm_reg64(insn.Op1.reg)
+    op2 = arm_reg64(insn.Op2.reg)
 
     emit("MOV {}, {}".format(op1, op2))
 
@@ -509,17 +669,35 @@ def c_jmp_rm(insn):
 
     op1 = arm_reg64(insn.Op1.reg)
 
-    emit("BR {}".format(op1))
+    if op1 == "X11":
+        emit("RET {}".format(op1))
+    else:
+        emit("BR {}".format(op1))
+
+
+def c_jsr(insn):
+    # CRN(lp) = CRN(pc); BRA(GR(m) & 0xFFFFFFFE);
+
+    assert insn.Op1.type == o_reg
+
+    op1 = arm_reg64(insn.Op1.reg)
+
+    emit("BLR {}".format(op1))
+
+
+def c_jmp_target24(insn):
+    # BRA((CRN(pc) & 0xf0000000) | target24)
+
+    op1 = "_" + idc.GetOpnd(insn.ip, 0)
+    emit("B {}".format(op1))
 
 
 def c_bsr(insn):
-    op1 = idc.GetOpnd(insn.ip, 0)
-    if op1.startswith("sub_"):
-        op1 = "imp_{}".format(op1)
+    op1 = "_" + idc.GetOpnd(insn.ip, 0)
     emit("BL {}".format(op1))
 
 
-def c_ldc(insn):
+def c_ldc_lp(insn):
     # GR(n) = CR(imm5)
 
     assert insn.Op1.type == o_reg
@@ -527,8 +705,8 @@ def c_ldc(insn):
     op1 = arm_reg64(insn.Op1.reg)
     # Lol :(
     dis = idc.GetDisasm(insn.ip)
-    op2 = dis.split(", ")[-1]
-    if op2 != "$lp":
+    op2 = dis.split(", ")[1]
+    if "$lp" not in op2:
         raise RuntimeError("ldc failed at 0x{:08X}, op2={}".format(insn.ip, op2))
 
     emit("MOV {}, LR".format(op1))
@@ -571,6 +749,21 @@ def c_bnei(insn):
 
     emit("CMP {}, #{}".format(op1, imm))
     emit("BNE {}".format(lbl))
+
+
+def c_beqi(insn):
+    # if (GR(n) == imm4) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4);
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_near
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
+
+    emit("CMP {}, #{}".format(op1, imm))
+    emit("BEQ {}".format(lbl))
 
 
 def c_bne(insn):
@@ -618,6 +811,21 @@ def c_blti(insn):
     emit("BLT {}".format(lbl))
 
 
+def c_bgei(insn):
+    # if ((int32_t)GR(n) >= (int32_t)imm4) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4);
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_near
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
+
+    emit("CMP {}, #{}".format(op1, imm))
+    emit("BGE {}".format(lbl))
+
+
 def c_sltu3_imm16(insn):
     # GR(n) = GR(m) < imm16
 
@@ -633,6 +841,21 @@ def c_sltu3_imm16(insn):
     emit("CSET {}, LO".format(op1))
 
 
+def c_slt3_imm16(insn):
+    # GR(n) = (int32_t)GR(m) < (int32_t)SignExt(imm16, 16, 32)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+    assert insn.Op3.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+    imm = insn.Op3.value
+
+    emit("CMP {}, #{}".format(op2, imm))
+    emit("CSET {}, LT".format(op1))
+
+
 def c_sltu3_r0(insn):
     # GRN(r0) = GR(n) < GR(m)
 
@@ -644,6 +867,19 @@ def c_sltu3_r0(insn):
 
     emit("CMP {}, {}".format(op1, op2))
     emit("CSET {}, LO".format(arm_reg(1)))
+
+
+def c_slt3_r0(insn):
+    # GRN(r0) = (int32_t)GR(n) < (int32_t)GR(m)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+
+    emit("CMP {}, {}".format(op1, op2))
+    emit("CSET {}, LT".format(arm_reg(1)))
 
 
 def c_sltu3_imm5(insn):
@@ -671,6 +907,32 @@ def c_sll_imm5(insn):
     emit("LSL {0}, {0}, #{1}".format(op1, imm))
 
 
+def c_sll_rm(insn):
+    # GR(n) = GR(n) << (GR(m) & 0b11111)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+
+    emit("AND {}, {}, #0b11111".format(g_tmp, op2))
+    emit("LSL {0}, {0}, {1}".format(op1, g_tmp))
+
+
+def c_srl_rm(insn):
+    # GR(n) = GR(n) >> (GR(m) & 0b11111)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+
+    emit("AND {}, {}, #0b11111".format(g_tmp, op2))
+    emit("LSR {0}, {0}, {1}".format(op1, g_tmp))
+
+
 def c_sll3(insn):
     # GR(0) = GR(n) << imm5
 
@@ -696,6 +958,18 @@ def c_srl_imm5(insn):
     emit("LSR {0}, {0}, #{1}".format(op1, imm))
 
 
+def c_sra_imm5(insn):
+    # GR(n) = SignExt((GR(n) >> Imm5), 32 - Imm5, 32)
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("ASR {0}, {0}, #{1}".format(op1, imm))
+
+
 def c_bra(insn):
     op1 = use_loc(insn.Op1.addr)
     emit("B {}".format(op1))
@@ -712,15 +986,23 @@ def c_and3(insn):
     op2 = arm_reg(insn.Op2.reg)
     imm = insn.Op3.value
 
-    emit("AND {}, {}, #{}".format(op1, op2, imm))
+    emit("LDR {}, =0x{:X}".format(g_tmp, imm))
+    emit("AND {}, {}, {}".format(op1, op2, g_tmp))
 
 
-def c_bgei(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    imm = idc.GetOperandValue(addr, 1)
-    dst = idc.GetOperandValue(addr, 2)
-    emit("cmp {}, #{}".format(op1, imm))
-    emit("bge loc_{:X}".format(dst))
+def c_xor3(insn):
+    # GR(n) = GR(m) ^ imm16
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+    assert insn.Op3.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+    imm = insn.Op3.value
+
+    emit("LDR {}, =0x{:X}".format(g_tmp, imm))
+    emit("EOR {}, {}, {}".format(op1, op2, g_tmp))
 
 
 def c_lbu_rm(insn):
@@ -733,6 +1015,18 @@ def c_lbu_rm(insn):
     op2 = arm_reg64(insn.Op2.reg)
 
     emit("LDRB {}, [{}]".format(op1, op2))
+
+
+def c_lhu_rm(insn):
+    # GR(n) = Load2(GR(m))
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg64(insn.Op2.reg)
+
+    emit("LDRH {}, [{}]".format(op1, op2))
 
 
 def c_lbu_disp16(insn):
@@ -749,6 +1043,19 @@ def c_lbu_disp16(insn):
     emit("LDRB {}, [{}, #{}]".format(op1, op2, imm))
 
 
+def c_lhu_disp16(insn):
+    # GR(n) = Load2(GR(m) + SignExt(disp16, 16, 32))
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+    assert insn.Op3.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+    op2 = arm_reg64(insn.Op3.reg)
+
+    emit("LDRH {}, [{}, #{}]".format(op1, op2, imm))
+
 
 def c_nor(insn):
     # GR(n) = ~(GR(n) | GR(m));
@@ -764,16 +1071,16 @@ def c_nor(insn):
     emit("EOR {0}, {0}, {1}".format(op1, g_tmp))
 
 
-def c_extb(addr):
-    op1 = arm_reg(idc.GetOpnd(addr, 0))
-    emit("sxtb {0}, {0}".format(op1))
+def c_neg(insn):
+    # GR(n) = -GR(m)
 
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
 
-def unsigned2signed32(val):
-    if val >= 2 ** 31:
-        val -= 2 ** 32
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
 
-    return val
+    emit("NEG {}, {}".format(op1, op2))
 
 
 def c_add3_imm16(insn):
@@ -783,11 +1090,18 @@ def c_add3_imm16(insn):
     assert insn.Op2.type == o_reg
     assert insn.Op3.type == o_imm
 
-    op1 = arm_reg(insn.Op1.reg)
     op2 = arm_reg(insn.Op2.reg)
+    if op2 == "SP":
+        op1 = arm_reg64(insn.Op1.reg)
+    else:
+        op1 = arm_reg(insn.Op1.reg)
     imm = unsigned2signed32(insn.Op3.value)
 
-    emit("ADD {}, {}, #{}".format(op1, op2, imm))
+    if out_of_range(imm):
+        emit("LDR {}, ={}".format(g_tmp, imm))
+        emit("ADD {}, {}, {}".format(op1, op2, g_tmp))
+    else:
+        emit("ADD {}, {}, #{}".format(op1, op2, imm))
 
 
 def c_add3_rl(insn):
@@ -840,6 +1154,55 @@ def c_sub(insn):
     emit("SUB {0}, {0}, {1}".format(op1, op2))
 
 
+def c_extb(insn):
+    assert insn.Op1.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+
+    emit("SXTB {0}, {0}".format(op1))
+
+
+def c_exth(insn):
+    assert insn.Op1.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+
+    emit("SXTH {0}, {0}".format(op1))
+
+
+def c_extub(insn):
+    # GR(n) = GR(n) & 0xFF
+
+    assert insn.Op1.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+
+    emit("UXTB {0}, {0}".format(op1))
+
+
+def c_extuh(insn):
+    # GR(n) = GR(n) & 0xFFFF
+
+    assert insn.Op1.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+
+    emit("UXTH {0}, {0}".format(op1))
+
+
+def c_abs(insn):
+    # Rn <- |Rn - Rm|
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+
+    emit("SUBS {0}, {0}, {1}".format(op1, op2))
+    emit("CSNEG {0}, {0}, {0}, PL".format(op1))
+
+
 rpb = 0
 rpe = 0
 is_erepeat = False
@@ -875,49 +1238,124 @@ def c_repeat(insn):
     emit("ADD {}, {}, #1".format(g_arm_rpc_reg, op1))
 
 
+def safe(s):
+    allowed = string.ascii_letters + string.digits
+    out = ""
+    for c in s:
+        if c not in allowed:
+            out += "_"
+        else:
+            out += c
+    return out
+
+
+def c_sys(insn):
+    dis = idc.GetDisasm(insn.ip)
+
+    emit("BL {}".format(safe(dis)))
+
+
 codegen = {
     mep.MEP_INSN_MOVH: c_movh,
     mep.MEP_INSN_MOVU24: c_movu,
     mep.MEP_INSN_OR3: c_or3,
     mep.MEP_INSN_EREPEAT: c_erepeat,
     mep.MEP_INSN_REPEAT: c_repeat,
+
+    mep.MEP_INSN_SW24: c_sw_abs24,
+    mep.MEP_INSN_LW24: c_lw_abs24,
+
+    mep.MEP_INSN_SB16: c_sb_disp16,
+    mep.MEP_INSN_LB16: c_lb_disp16,
+
+    mep.MEP_INSN_SH16: c_sh_disp16,
+    mep.MEP_INSN_LH16: c_lh_disp16,
+
+    mep.MEP_INSN_LHU16: c_lhu_disp16,
+
     mep.MEP_INSN_LW: c_lw_rm,
+    mep.MEP_INSN_LB: c_lb_rm,
+    mep.MEP_INSN_SB: c_sb,
+    mep.MEP_INSN_SH: c_sh_rm,
     mep.MEP_INSN_SW: c_sw_rm,
     mep.MEP_INSN_LW_SP: c_lw_sp,
     mep.MEP_INSN_SW_SP: c_sw_sp,
+    mep.MEP_INSN_SW16: c_sw_disp16,
     mep.MEP_INSN_BNEZ: c_bnez,
     mep.MEP_INSN_BEQZ: c_beqz,
     mep.MEP_INSN_MOV: c_mov_rm,
     mep.MEP_INSN_MOVI8: c_mov_imm8,
     mep.MEP_INSN_RET: c_ret,
     mep.MEP_INSN_ADD3X: c_add3_imm16,
-    mep.MEP_INSN_LDC_LP: c_ldc,
+    mep.MEP_INSN_LDC_LP: c_ldc_lp,
     mep.MEP_INSN_LW16: c_lw_disp16,
+
+    mep.MEP_INSN_SLT3X: c_slt3_imm16,
     mep.MEP_INSN_SLTU3X: c_sltu3_imm16,
+
     mep.MEP_INSN_JMP: c_jmp_rm,
+    mep.MEP_INSN_JMP24: c_jmp_target24,
     mep.MEP_INSN_BNEI: c_bnei,
+    mep.MEP_INSN_BEQI: c_beqi,
     mep.MEP_INSN_BNE: c_bne,
     mep.MEP_INSN_BEQ: c_beq,
     mep.MEP_INSN_BLTI: c_blti,
+    mep.MEP_INSN_BGEI: c_bgei,
     mep.MEP_INSN_BSR12: c_bsr,
     mep.MEP_INSN_BSR24: c_bsr,
+    mep.MEP_INSN_JSR: c_jsr,
     mep.MEP_INSN_SLLI: c_sll_imm5,
     mep.MEP_INSN_SRLI: c_srl_imm5,
     mep.MEP_INSN_ADD: c_add,
     mep.MEP_INSN_SUB: c_sub,
+    
     mep.MEP_INSN_OR: c_or,
     mep.MEP_INSN_AND: c_and,
+    mep.MEP_INSN_XOR: c_xor,
+
     mep.MEP_INSN_BRA: c_bra,
     mep.MEP_INSN_ADD3: c_add3_rl,
     mep.MEP_INSN_AND3: c_and3,
+    mep.MEP_INSN_XOR3: c_xor3,
     mep.MEP_INSN_ADD3I: c_add3_sp,
+    mep.MEP_INSN_SLT3: c_slt3_r0,
     mep.MEP_INSN_SLTU3: c_sltu3_r0,
     mep.MEP_INSN_MOVI16: c_mov_imm8,
     mep.MEP_INSN_LBU: c_lbu_rm,
+    mep.MEP_INSN_LHU: c_lhu_rm,
     mep.MEP_INSN_LBU16: c_lbu_disp16,
+    mep.MEP_INSN_SLL: c_sll_rm,
+    mep.MEP_INSN_SRL: c_srl_rm,
     mep.MEP_INSN_SLL3: c_sll3,
     mep.MEP_INSN_NOR: c_nor,
     mep.MEP_INSN_SLTU3I: c_sltu3_imm5,
+    mep.MEP_INSN_NEG: c_neg,
+
+    mep.MEP_INSN_EXTB: c_extb,
+    mep.MEP_INSN_EXTUB: c_extub,
+    mep.MEP_INSN_EXTH: c_exth,
+    mep.MEP_INSN_EXTUH: c_extuh,
+
+    mep.MEP_INSN_SRAI: c_sra_imm5,
+
+    mep.MEP_INSN_ABS: c_abs,
+
+    # System instructions we can't support
+    mep.MEP_INSN_STC_LP: c_sys,
+    mep.MEP_INSN_STC_HI: c_sys,
+    mep.MEP_INSN_STC_LO: c_sys,
+    mep.MEP_INSN_STC: c_sys,
+    mep.MEP_INSN_LDC_HI: c_sys,
+    mep.MEP_INSN_LDC_LO: c_sys,
+    mep.MEP_INSN_LDC: c_sys,
+    mep.MEP_INSN_EI: c_sys,
+    mep.MEP_INSN_DI: c_sys,
+    mep.MEP_INSN_SLEEP: c_sys,
+    mep.MEP_INSN_RETI: c_sys,
+    mep.MEP_INSN_STCB: c_sys,
+    mep.MEP_INSN_STCB_R: c_sys,
+    mep.MEP_INSN_LDCB: c_sys,
+    mep.MEP_INSN_LDCB_R: c_sys,
 }
 
 
@@ -948,10 +1386,15 @@ def decompile(ea):
             output.append(Loc(addr))
 
             if code in codegen:
-                codegen[code](insn)
+                try:
+                    codegen[code](insn)
+                except:
+                    print("Errored at 0x{:08X}!".format(addr))
+                    raise
             else:
                 dis = idc.GetDisasm(addr)
                 print("at 0x{:08X}: unknown instruction code={:3}, disasm={}".format(addr, code, dis))
+                emit("BRK #0")
 
             # If there's a jump to rpb pending, decrease its counter...
             if rpb_in > 0:
@@ -968,11 +1411,9 @@ def decompile(ea):
                     emit("BNE {}".format(use_loc(rpb)))
 
 
-decompile(ScreenEA())
-
-last = output[-1]
-if isinstance(last, Insn) and last.s.startswith("BR "):
-    last.s = "RET " + last.s[3:]
+for segea in Segments():
+    for funcea in Functions(segea, SegEnd(segea)):
+        decompile(funcea)
 
 s = ""
 for item in output:
@@ -981,9 +1422,6 @@ for item in output:
     if isinstance(item, Loc) and item.s in used_locs:
         s += format_loc(item.s) + ":\n"
 
-# print("-" * 80)
-# print(s)
-# print("-" * 80)
 
 with open("F:/test.asm", "w") as fout:
     fout.write(s)
