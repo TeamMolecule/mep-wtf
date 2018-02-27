@@ -509,21 +509,6 @@ def c_or(insn):
     emit("ORR {0}, {0}, {1}".format(op1, op2))
 
 
-def c_or3(insn):
-    # GR(n) = GR(m) | imm16
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-    assert insn.Op3.type == o_imm
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
-    imm = insn.Op3.value
-
-    emit("MOV {}, #0x{:X}".format(g_tmp, imm))
-    emit("ORR {}, {}, {}".format(op1, op2, g_tmp))
-
-
 def c_mov_rm(insn):
     # GR(n) = GR(m)
 
@@ -817,34 +802,23 @@ def c_bra(insn):
     emit("B {}".format(op1))
 
 
-def c_and3(insn):
-    # GR(n) = GR(m) & imm16
+def make_logic3(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_reg
+        assert insn.Op3.type == o_imm
 
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-    assert insn.Op3.type == o_imm
+        op1 = arm_reg(insn.Op1.reg)
+        op2 = arm_reg(insn.Op2.reg)
+        imm = unsigned2signed32(insn.Op3.value)
 
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
-    imm = insn.Op3.value
+        if out_of_range(imm):
+            emit("LDR {}, =0x{:X}".format(g_tmp, imm))
+        else:
+            emit("MOV {}, #{}".format(g_tmp, imm))
+        emit("{} {}, {}, {}".format(mnem, op1, op2, g_tmp))
 
-    emit("LDR {}, =0x{:X}".format(g_tmp, imm))
-    emit("AND {}, {}, {}".format(op1, op2, g_tmp))
-
-
-def c_xor3(insn):
-    # GR(n) = GR(m) ^ imm16
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-    assert insn.Op3.type == o_imm
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
-    imm = insn.Op3.value
-
-    emit("LDR {}, =0x{:X}".format(g_tmp, imm))
-    emit("EOR {}, {}, {}".format(op1, op2, g_tmp))
+    return inner
 
 
 def c_lbu_rm(insn):
@@ -1026,7 +1000,11 @@ codegen = {
 
     mep.MEP_INSN_MOVH: c_movh,
     mep.MEP_INSN_MOVU24: c_movu,
-    mep.MEP_INSN_OR3: c_or3,
+
+    # 3-arg logic
+    mep.MEP_INSN_AND3: make_logic3("AND"),
+    mep.MEP_INSN_OR3: make_logic3("ORR"),
+    mep.MEP_INSN_XOR3: make_logic3("EOR"),
 
     # Load/Store abs24
     mep.MEP_INSN_SW24: make_load_store_abs24("STR"),
@@ -1092,8 +1070,6 @@ codegen = {
 
     mep.MEP_INSN_BRA: c_bra,
     mep.MEP_INSN_ADD3: c_add3_rl,
-    mep.MEP_INSN_AND3: c_and3,
-    mep.MEP_INSN_XOR3: c_xor3,
     mep.MEP_INSN_ADD3I: c_add3_sp,
     mep.MEP_INSN_SLT3: c_slt3_r0,
     mep.MEP_INSN_SLTU3: c_sltu3_r0,
