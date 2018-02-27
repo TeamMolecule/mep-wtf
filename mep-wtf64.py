@@ -426,7 +426,7 @@ def make_load_store_disp16(mnem):
     return inner
 
 
-def make_load_store_sp(insn):
+def c_lw_sp(insn):
     # GR(n) = Load4(GRN(sp) + disp7)
 
     assert insn.Op1.type == o_reg
@@ -1003,6 +1003,7 @@ codegen = {
     mep.MEP_INSN_SLL3: c_sll3,
     mep.MEP_INSN_SLTU3I: c_sltu3_imm5,
 
+    # Unsigned/signed extends
     mep.MEP_INSN_EXTB: make_ext("SXTB"),
     mep.MEP_INSN_EXTUB: make_ext("UXTB"),
     mep.MEP_INSN_EXTH: make_ext("SXTH"),
