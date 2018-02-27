@@ -705,18 +705,6 @@ def c_sltu3_imm5(insn):
     emit("CSET {}, LO".format(arm_reg(1)))
 
 
-def c_sll_imm5(insn):
-    # GR(n) = GR(n) << Imm5
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-
-    emit("LSL {0}, {0}, #{1}".format(op1, imm))
-
-
 def c_sll_rm(insn):
     # GR(n) = GR(n) << (GR(m) & 0b11111)
 
@@ -754,30 +742,6 @@ def c_sll3(insn):
     imm = insn.Op2.value
 
     emit("LSL {}, {}, #{}".format(r0, op1, imm))
-
-
-def c_srl_imm5(insn):
-    # GR(n) = GR(n) >> Imm5
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-
-    emit("LSR {0}, {0}, #{1}".format(op1, imm))
-
-
-def c_sra_imm5(insn):
-    # GR(n) = SignExt((GR(n) >> Imm5), 32 - Imm5, 32)
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-
-    emit("ASR {0}, {0}, #{1}".format(op1, imm))
 
 
 def c_bra(insn):
