@@ -302,6 +302,24 @@ def use_loc(addr):
     return format_loc(addr)
 
 
+def safe(s):
+    allowed = string.ascii_letters + string.digits
+    out = ""
+    for c in s:
+        if c not in allowed:
+            out += "_"
+        else:
+            out += c
+    return out
+
+
+def function_name(name):
+    name = safe(name)
+    if name.startswith("sub_"):
+        name = "_" + name
+    return name
+
+
 def arm_reg(num):
     # https://github.com/yifanlu/toshiba-mep-idp/blob/11082f689ed2cf0d6c0793beb84cff599de22a73/reg.cpp#L29
     if num == 14:
@@ -688,12 +706,12 @@ def c_jsr(insn):
 def c_jmp_target24(insn):
     # BRA((CRN(pc) & 0xf0000000) | target24)
 
-    op1 = "_" + idc.GetOpnd(insn.ip, 0)
+    op1 = function_name(idc.GetOpnd(insn.ip, 0))
     emit("B {}".format(op1))
 
 
 def c_bsr(insn):
-    op1 = "_" + idc.GetOpnd(insn.ip, 0)
+    op1 = function_name(idc.GetOpnd(insn.ip, 0))
     emit("BL {}".format(op1))
 
 
@@ -1238,21 +1256,10 @@ def c_repeat(insn):
     emit("ADD {}, {}, #1".format(g_arm_rpc_reg, op1))
 
 
-def safe(s):
-    allowed = string.ascii_letters + string.digits
-    out = ""
-    for c in s:
-        if c not in allowed:
-            out += "_"
-        else:
-            out += c
-    return out
-
-
 def c_sys(insn):
-    dis = idc.GetDisasm(insn.ip)
-
-    emit("BL {}".format(safe(dis)))
+    # dis = idc.GetDisasm(insn.ip)
+    # emit("BL {}".format(safe(dis)))
+    emit("BRK #0")
 
 
 codegen = {
@@ -1364,7 +1371,7 @@ def decompile(ea):
 
     rpb_in = -1
 
-    name = "_" + GetFunctionName(ea).replace(":", "_")
+    name = function_name(GetFunctionName(ea))
 
     emit(".global {}".format(name))
     emit("{}:".format(name))
