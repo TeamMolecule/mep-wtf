@@ -716,13 +716,16 @@ def c_ldc_lp(insn):
     assert insn.Op1.type == o_reg
 
     op1 = arm_reg64(insn.Op1.reg)
-    # Lol :(
-    dis = idc.GetDisasm(insn.ip)
-    op2 = dis.split(", ")[1]
-    if "$lp" not in op2:
-        raise RuntimeError("ldc failed at 0x{:08X}, op2={}".format(insn.ip, op2))
 
     emit("MOV {}, LR".format(op1))
+
+
+def c_stc_lp(insn):
+    assert insn.Op1.type == o_reg
+
+    op1 = arm_reg64(insn.Op1.reg)
+
+    emit("MOV LR, {}".format(op1))
 
 
 def c_bnez(insn):
@@ -1290,6 +1293,7 @@ codegen = {
     mep.MEP_INSN_RET: c_ret,
     mep.MEP_INSN_ADD3X: c_add3_imm16,
     mep.MEP_INSN_LDC_LP: c_ldc_lp,
+    mep.MEP_INSN_STC_LP: c_stc_lp,
     mep.MEP_INSN_LW16: c_lw_disp16,
 
     mep.MEP_INSN_SLT3X: c_slt3_imm16,
@@ -1343,7 +1347,6 @@ codegen = {
     mep.MEP_INSN_ABS: c_abs,
 
     # System instructions we can't support
-    mep.MEP_INSN_STC_LP: c_sys, # TODO: need to support this
     mep.MEP_INSN_STC_HI: c_sys,
     mep.MEP_INSN_STC_LO: c_sys,
     mep.MEP_INSN_STC: c_sys,
