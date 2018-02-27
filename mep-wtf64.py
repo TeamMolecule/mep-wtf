@@ -362,18 +362,6 @@ def out_of_range(val):
     return val >= 2 ** 11 or val <= -(2 ** 11)
 
 
-def c_and(insn):
-    # GR(n) = GR(n) & GR(m);
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-    
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
-
-    emit("AND {0}, {0}, {1}".format(op1, op2))
-
-
 def c_xor(insn):
     # GR(n) = GR(n) ^ GR(m)
 
@@ -497,16 +485,17 @@ def c_movu(insn):
     emit("LDR {}, =0x{:08X}".format(reg, imm))
 
 
-def c_or(insn):
-    # GR(n) = GR(n) | GR(m)
+def make_logic2(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_reg
 
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-    
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
+        op1 = arm_reg(insn.Op1.reg)
+        op2 = arm_reg(insn.Op2.reg)
 
-    emit("ORR {0}, {0}, {1}".format(op1, op2))
+        emit("{mnem} {op1}, {op1}, {op2}".format(mnem=mnem, op1=op1, op2=op2))
+
+    return inner
 
 
 def c_mov_rm(insn):
@@ -918,18 +907,6 @@ def c_add(insn):
     emit("ADD {0}, {0}, #{1}".format(op1, imm))
 
 
-def c_sub(insn):
-    # GR(n) = GR(n) - GR(m);
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
-
-    emit("SUB {0}, {0}, {1}".format(op1, op2))
-
-
 def make_ext(mnem):
     def inner(insn):
         assert insn.Op1.type == o_reg
@@ -1001,6 +978,13 @@ codegen = {
     mep.MEP_INSN_MOVH: c_movh,
     mep.MEP_INSN_MOVU24: c_movu,
 
+    # 2-arg arith/logic
+    mep.MEP_INSN_SUB: make_logic2("SUB"),
+    mep.MEP_INSN_OR: make_logic2("ORR"),
+    mep.MEP_INSN_AND: make_logic2("AND"),
+    # This one has a special case
+    mep.MEP_INSN_XOR: c_xor,
+
     # 3-arg logic
     mep.MEP_INSN_AND3: make_logic3("AND"),
     mep.MEP_INSN_OR3: make_logic3("ORR"),
@@ -1062,11 +1046,6 @@ codegen = {
     mep.MEP_INSN_SLLI: c_sll_imm5,
     mep.MEP_INSN_SRLI: c_srl_imm5,
     mep.MEP_INSN_ADD: c_add,
-    mep.MEP_INSN_SUB: c_sub,
-    
-    mep.MEP_INSN_OR: c_or,
-    mep.MEP_INSN_AND: c_and,
-    mep.MEP_INSN_XOR: c_xor,
 
     mep.MEP_INSN_BRA: c_bra,
     mep.MEP_INSN_ADD3: c_add3_rl,
