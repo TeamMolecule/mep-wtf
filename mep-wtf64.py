@@ -38,7 +38,7 @@ from idaapi import o_reg, o_imm
 
 output = []
 
-g_tmp = "W5" # TODO
+g_tmp = "W5"
 g_tmp64 = "X5"
 g_arm_rpc_reg = "W6"
 
@@ -349,11 +349,6 @@ def arm_reg(num):
 
 def arm_reg64(num):
     return arm_reg(num).replace("W", "X")
-
-
-def convert_label(lbl):
-    # TODO: resolve the label to address
-    return lbl.replace("locret", "loc")
 
 
 def unsigned2signed32(val):
@@ -1348,7 +1343,7 @@ codegen = {
     mep.MEP_INSN_ABS: c_abs,
 
     # System instructions we can't support
-    mep.MEP_INSN_STC_LP: c_sys,
+    mep.MEP_INSN_STC_LP: c_sys, # TODO: need to support this
     mep.MEP_INSN_STC_HI: c_sys,
     mep.MEP_INSN_STC_LO: c_sys,
     mep.MEP_INSN_STC: c_sys,
