@@ -1170,40 +1170,13 @@ def c_sub(insn):
     emit("SUB {0}, {0}, {1}".format(op1, op2))
 
 
-def c_extb(insn):
-    assert insn.Op1.type == o_reg
+def make_ext(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        op1 = arm_reg(insn.Op1.reg)
+        emit("{mnem} {op}, {op}".format(mnem=mnem, op=op1))
 
-    op1 = arm_reg(insn.Op1.reg)
-
-    emit("SXTB {0}, {0}".format(op1))
-
-
-def c_exth(insn):
-    assert insn.Op1.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-
-    emit("SXTH {0}, {0}".format(op1))
-
-
-def c_extub(insn):
-    # GR(n) = GR(n) & 0xFF
-
-    assert insn.Op1.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-
-    emit("UXTB {0}, {0}".format(op1))
-
-
-def c_extuh(insn):
-    # GR(n) = GR(n) & 0xFFFF
-
-    assert insn.Op1.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-
-    emit("UXTH {0}, {0}".format(op1))
+    return inner
 
 
 def c_abs(insn):
@@ -1337,10 +1310,10 @@ codegen = {
     mep.MEP_INSN_SLTU3I: c_sltu3_imm5,
     mep.MEP_INSN_NEG: c_neg,
 
-    mep.MEP_INSN_EXTB: c_extb,
-    mep.MEP_INSN_EXTUB: c_extub,
-    mep.MEP_INSN_EXTH: c_exth,
-    mep.MEP_INSN_EXTUH: c_extuh,
+    mep.MEP_INSN_EXTB: make_ext("SXTB"),
+    mep.MEP_INSN_EXTUB: make_ext("UXTB"),
+    mep.MEP_INSN_EXTH: make_ext("SXTH"),
+    mep.MEP_INSN_EXTUH: make_ext("UXTH"),
 
     mep.MEP_INSN_SRAI: c_sra_imm5,
 
