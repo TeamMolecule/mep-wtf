@@ -562,20 +562,14 @@ def c_bsr(insn):
 
 
 def c_ldc_lp(insn):
-    # GR(n) = CR(imm5)
-
     assert insn.Op1.type == o_reg
-
     op1 = arm_reg64(insn.Op1.reg)
-
     emit("MOV {}, LR".format(op1))
 
 
 def c_stc_lp(insn):
     assert insn.Op1.type == o_reg
-
     op1 = arm_reg64(insn.Op1.reg)
-
     emit("MOV LR, {}".format(op1))
 
 
@@ -895,16 +889,17 @@ def c_add3_sp(insn):
     emit("ADD {}, SP, #{}".format(op1, imm))
 
 
-def c_add(insn):
-    # GR(n) = GR(n) + SignExt(imm6, 6, 32)
+def make_logic_ri(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_imm
 
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
+        op1 = arm_reg(insn.Op1.reg)
+        imm = unsigned2signed32(insn.Op2.value)
 
-    op1 = arm_reg(insn.Op1.reg)
-    imm = unsigned2signed32(insn.Op2.value)
+        emit("{mnem} {op1}, {op1}, #{imm}".format(mnem=mnem, op1=op1, imm=imm))
 
-    emit("ADD {0}, {0}, #{1}".format(op1, imm))
+    return inner
 
 
 def make_ext(mnem):
@@ -975,9 +970,6 @@ codegen = {
     mep.MEP_INSN_EREPEAT: c_erepeat,
     mep.MEP_INSN_REPEAT: c_repeat,
 
-    mep.MEP_INSN_MOVH: c_movh,
-    mep.MEP_INSN_MOVU24: c_movu,
-
     # 2-arg arith/logic
     mep.MEP_INSN_SUB: make_logic2("SUB"),
     mep.MEP_INSN_OR: make_logic2("ORR"),
@@ -989,6 +981,12 @@ codegen = {
     mep.MEP_INSN_AND3: make_logic3("AND"),
     mep.MEP_INSN_OR3: make_logic3("ORR"),
     mep.MEP_INSN_XOR3: make_logic3("EOR"),
+
+    # register+imm logic
+    mep.MEP_INSN_SLLI: make_logic_ri("LSL"),
+    mep.MEP_INSN_SRLI: make_logic_ri("LSR"),
+    mep.MEP_INSN_SRAI: make_logic_ri("ASR"),
+    mep.MEP_INSN_ADD: make_logic_ri("ADD"),
 
     # Load/Store abs24
     mep.MEP_INSN_SW24: make_load_store_abs24("STR"),
@@ -1020,8 +1018,13 @@ codegen = {
 
     mep.MEP_INSN_MOV: c_mov_rm,
     mep.MEP_INSN_MOVI8: c_mov_imm8,
+    mep.MEP_INSN_MOVH: c_movh,
+    mep.MEP_INSN_MOVU24: c_movu,
+
     mep.MEP_INSN_RET: c_ret,
     mep.MEP_INSN_ADD3X: c_add3_imm16,
+
+    # Load/Store link register
     mep.MEP_INSN_LDC_LP: c_ldc_lp,
     mep.MEP_INSN_STC_LP: c_stc_lp,
 
@@ -1043,9 +1046,6 @@ codegen = {
     mep.MEP_INSN_BSR12: c_bsr,
     mep.MEP_INSN_BSR24: c_bsr,
     mep.MEP_INSN_JSR: c_jsr,
-    mep.MEP_INSN_SLLI: c_sll_imm5,
-    mep.MEP_INSN_SRLI: c_srl_imm5,
-    mep.MEP_INSN_ADD: c_add,
 
     mep.MEP_INSN_BRA: c_bra,
     mep.MEP_INSN_ADD3: c_add3_rl,
@@ -1066,7 +1066,6 @@ codegen = {
     mep.MEP_INSN_EXTH: make_ext("SXTH"),
     mep.MEP_INSN_EXTUH: make_ext("UXTH"),
 
-    mep.MEP_INSN_SRAI: c_sra_imm5,
 
     mep.MEP_INSN_ABS: c_abs,
 
