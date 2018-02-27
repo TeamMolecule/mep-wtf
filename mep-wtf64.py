@@ -752,34 +752,22 @@ def c_beqz(insn):
     emit("BEQ {}".format(lbl))
 
 
-def c_bnei(insn):
-    # if (GR(n) != imm4) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4)
+def make_cmp_b_rin(mnem):
+    # For the record, rin here stands for register/immediate/near:
+    # the operands we support
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_imm
+        assert insn.Op3.type == o_near
 
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_near
+        op1 = arm_reg(insn.Op1.reg)
+        imm = insn.Op2.value
+        lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
 
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
+        emit("CMP {}, #{}".format(op1, imm))
+        emit("{} {}".format(mnem, lbl))
 
-    emit("CMP {}, #{}".format(op1, imm))
-    emit("BNE {}".format(lbl))
-
-
-def c_beqi(insn):
-    # if (GR(n) == imm4) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4);
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_near
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
-
-    emit("CMP {}, #{}".format(op1, imm))
-    emit("BEQ {}".format(lbl))
+    return inner
 
 
 def c_bne(insn):
@@ -810,36 +798,6 @@ def c_beq(insn):
 
     emit("CMP {}, {}".format(op1, op2))
     emit("BEQ {}".format(lbl))
-
-
-def c_blti(insn):
-    # if ((int32_t)GR(n) < (int32_t)imm4) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4);
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_near
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
-
-    emit("CMP {}, #{}".format(op1, imm))
-    emit("BLT {}".format(lbl))
-
-
-def c_bgei(insn):
-    # if ((int32_t)GR(n) >= (int32_t)imm4) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4);
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_near
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
-
-    emit("CMP {}, #{}".format(op1, imm))
-    emit("BGE {}".format(lbl))
 
 
 def c_sltu3_imm16(insn):
@@ -1259,8 +1217,6 @@ codegen = {
     mep.MEP_INSN_LW_SP: c_lw_sp,
     mep.MEP_INSN_SW_SP: c_sw_sp,
     mep.MEP_INSN_SW16: c_sw_disp16,
-    mep.MEP_INSN_BNEZ: c_bnez,
-    mep.MEP_INSN_BEQZ: c_beqz,
     mep.MEP_INSN_MOV: c_mov_rm,
     mep.MEP_INSN_MOVI8: c_mov_imm8,
     mep.MEP_INSN_RET: c_ret,
@@ -1274,12 +1230,17 @@ codegen = {
 
     mep.MEP_INSN_JMP: c_jmp_rm,
     mep.MEP_INSN_JMP24: c_jmp_target24,
-    mep.MEP_INSN_BNEI: c_bnei,
-    mep.MEP_INSN_BEQI: c_beqi,
+
     mep.MEP_INSN_BNE: c_bne,
     mep.MEP_INSN_BEQ: c_beq,
-    mep.MEP_INSN_BLTI: c_blti,
-    mep.MEP_INSN_BGEI: c_bgei,
+    mep.MEP_INSN_BNEZ: c_bnez,
+    mep.MEP_INSN_BEQZ: c_beqz,
+
+    mep.MEP_INSN_BNEI: make_cmp_b_rin("BNE"),
+    mep.MEP_INSN_BEQI: make_cmp_b_rin("BEQ"),
+    mep.MEP_INSN_BLTI: make_cmp_b_rin("BLT"),
+    mep.MEP_INSN_BGEI: make_cmp_b_rin("BGE"),
+
     mep.MEP_INSN_BSR12: c_bsr,
     mep.MEP_INSN_BSR24: c_bsr,
     mep.MEP_INSN_JSR: c_jsr,
