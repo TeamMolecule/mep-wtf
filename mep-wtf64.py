@@ -416,24 +416,6 @@ def c_lb_rm(insn):
     emit("LDRSB {}, [{}]".format(op1, op2))
 
 
-def c_lw_disp16(insn):
-    # GR(n) = Load4(GR(m) + SignExt(disp16, 16, 32))
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = unsigned2signed32(insn.Op2.value)
-    op2 = arm_reg64(insn.Op3.reg)
-
-    if out_of_range(imm):
-        emit("LDR {}, ={}".format(g_tmp, imm))
-        emit("LDR {}, [{}, {}]".format(op1, op2, g_tmp64))
-    else:
-        emit("LDR {}, [{}, #{}]".format(op1, op2, imm))
-
-
 def c_sw_rm(insn):
     # Store4(GR(n), GR(m))
 
@@ -529,24 +511,6 @@ def c_sw_sp(insn):
     imm = insn.Op2.value
 
     emit("STR {}, [SP, #{}]".format(op1, imm))
-
-
-def c_sw_disp16(insn):
-    # Store4(GR(n), GR(m) + SignExt(disp16, 16, 32))
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-    op2 = arm_reg64(insn.Op3.reg)
-
-    if out_of_range(imm):
-        emit("LDR {}, ={}".format(g_tmp, imm))
-        emit("STR {}, [{}, {}]".format(op1, op2, g_tmp64))
-    else:
-        emit("STR {}, [{}, #{}]".format(op1, op2, imm))
 
 
 def c_movh(insn):
@@ -952,34 +916,6 @@ def c_lhu_rm(insn):
     op2 = arm_reg64(insn.Op2.reg)
 
     emit("LDRH {}, [{}]".format(op1, op2))
-
-
-def c_lbu_disp16(insn):
-    # GR(n) = Load1(GR(m) + SignExt(disp16, 16, 32))
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-    op2 = arm_reg64(insn.Op3.reg)
-
-    emit("LDRB {}, [{}, #{}]".format(op1, op2, imm))
-
-
-def c_lhu_disp16(insn):
-    # GR(n) = Load2(GR(m) + SignExt(disp16, 16, 32))
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    imm = insn.Op2.value
-    op2 = arm_reg64(insn.Op3.reg)
-
-    emit("LDRH {}, [{}, #{}]".format(op1, op2, imm))
 
 
 def c_nor(insn):
