@@ -728,28 +728,18 @@ def c_stc_lp(insn):
     emit("MOV LR, {}".format(op1))
 
 
-def c_bnez(insn):
-    # if (GR(n) != 0) BRA(CRN(pc) + SignExt(disp8, 8, 32) - 2)
+def make_cmpz_b(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_near
 
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_near
+        op1 = arm_reg(insn.Op1.reg)
+        lbl = use_loc(idc.GetOperandValue(insn.ip, 1))
 
-    op1 = arm_reg(insn.Op1.reg)
-    lbl = use_loc(idc.GetOperandValue(insn.ip, 1))
-    emit("CMP {}, #0".format(op1))
-    emit("BNE {}".format(lbl))
+        emit("CMP {}, #0".format(op1))
+        emit("{} {}".format(mnem, lbl))
 
-
-def c_beqz(insn):
-    # if (GR(n) == 0) BRA(CRN(pc) + SignExt(disp8, 8, 32) - 2);
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_near
-
-    op1 = arm_reg(insn.Op1.reg)
-    lbl = use_loc(idc.GetOperandValue(insn.ip, 1))
-    emit("CMP {}, #0".format(op1))
-    emit("BEQ {}".format(lbl))
+    return inner
 
 
 def make_cmp_b_rin(mnem):
@@ -770,19 +760,20 @@ def make_cmp_b_rin(mnem):
     return inner
 
 
-def c_bne(insn):
-    # if (GR(n) != GR(m)) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4);
+def make_cmp_b(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_reg
+        assert insn.Op3.type == o_near
 
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-    assert insn.Op3.type == o_near
+        op1 = arm_reg(insn.Op1.reg)
+        op2 = arm_reg(insn.Op2.reg)
+        lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
 
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
-    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
+        emit("CMP {}, {}".format(op1, op2))
+        emit("{} {}".format(mnem, lbl))
 
-    emit("CMP {}, {}".format(op1, op2))
-    emit("BNE {}".format(lbl))
+    return inner
 
 
 def c_beq(insn):
@@ -1231,11 +1222,10 @@ codegen = {
     mep.MEP_INSN_JMP: c_jmp_rm,
     mep.MEP_INSN_JMP24: c_jmp_target24,
 
-    mep.MEP_INSN_BNE: c_bne,
-    mep.MEP_INSN_BEQ: c_beq,
-    mep.MEP_INSN_BNEZ: c_bnez,
-    mep.MEP_INSN_BEQZ: c_beqz,
-
+    mep.MEP_INSN_BNE: make_cmp_b("BNE"),
+    mep.MEP_INSN_BEQ: make_cmp_b("BEQ"),
+    mep.MEP_INSN_BNEZ: make_cmpz_b("BNE"),
+    mep.MEP_INSN_BEQZ: make_cmpz_b("BEQ"),
     mep.MEP_INSN_BNEI: make_cmp_b_rin("BNE"),
     mep.MEP_INSN_BEQI: make_cmp_b_rin("BEQ"),
     mep.MEP_INSN_BLTI: make_cmp_b_rin("BLT"),
