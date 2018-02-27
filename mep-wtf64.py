@@ -392,40 +392,17 @@ def c_xor(insn):
         emit("EOR {0}, {0}, {1}".format(op1, op2))
 
 
-def c_lw_rm(insn):
-    # GR(n) = Load4(GR(m))
+def make_load_store_rm(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_reg
 
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
+        op1 = arm_reg(insn.Op1.reg)
+        op2 = arm_reg64(insn.Op2.reg)
 
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg64(insn.Op2.reg)
+        emit("{} {}, [{}]".format(mnem, op1, op2))
 
-    emit("LDR {}, [{}]".format(op1, op2))
-
-
-def c_lb_rm(insn):
-    # GR(n) = SignExt(Load1(GR(m)), 8, 32)
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg64(insn.Op2.reg)
-
-    emit("LDRSB {}, [{}]".format(op1, op2))
-
-
-def c_sw_rm(insn):
-    # Store4(GR(n), GR(m))
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg64(insn.Op2.reg)
-
-    emit("STR {}, [{}]".format(op1, op2))
+    return inner
 
 
 def make_load_store_abs24(mnem):
@@ -440,30 +417,6 @@ def make_load_store_abs24(mnem):
         emit("{} {}, [{}]".format(mnem, op1, g_tmp64))
 
     return inner
-
-
-def c_sb(insn):
-    # Store1(GR(n), GR(m));
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg64(insn.Op2.reg)
-
-    emit("STRB {}, [{}]".format(op1, op2))
-
-
-def c_sh_rm(insn):
-    # Store1(GR(n), GR(m));
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg64(insn.Op2.reg)
-
-    emit("STRH {}, [{}]".format(op1, op2))
 
 
 def make_load_store_disp16(mnem):
@@ -485,7 +438,7 @@ def make_load_store_disp16(mnem):
     return inner
 
 
-def c_lw_sp(insn):
+def make_load_store_sp(insn):
     # GR(n) = Load4(GRN(sp) + disp7)
 
     assert insn.Op1.type == o_reg
@@ -906,18 +859,6 @@ def c_lbu_rm(insn):
     emit("LDRB {}, [{}]".format(op1, op2))
 
 
-def c_lhu_rm(insn):
-    # GR(n) = Load2(GR(m))
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg64(insn.Op2.reg)
-
-    emit("LDRH {}, [{}]".format(op1, op2))
-
-
 def c_nor(insn):
     # GR(n) = ~(GR(n) | GR(m));
 
@@ -1101,14 +1042,17 @@ codegen = {
     mep.MEP_INSN_SW16: make_load_store_disp16("STR"),
     mep.MEP_INSN_LW16: make_load_store_disp16("LDR"),
 
-    mep.MEP_INSN_SW: c_sw_rm,
-    mep.MEP_INSN_LW: c_lw_rm,
+    # Load/Store reg
+    mep.MEP_INSN_SW: make_load_store_rm("STR"),
+    mep.MEP_INSN_LW: make_load_store_rm("LDR"),
+    mep.MEP_INSN_SH: make_load_store_rm("STRH"),
+    mep.MEP_INSN_LH: make_load_store_rm("LDRSH"),
+    mep.MEP_INSN_LHU: make_load_store_rm("LDRH"),
+    mep.MEP_INSN_SB: make_load_store_rm("STRB"),
+    mep.MEP_INSN_LB: make_load_store_rm("LDRSB"),
+    mep.MEP_INSN_LBU: make_load_store_rm("LDRB"),
 
-    mep.MEP_INSN_SH: c_sh_rm,
-
-    mep.MEP_INSN_SB: c_sb,
-    mep.MEP_INSN_LB: c_lb_rm,
-
+    # Load/Store sp-relative
     mep.MEP_INSN_LW_SP: c_lw_sp,
     mep.MEP_INSN_SW_SP: c_sw_sp,
 
@@ -1154,8 +1098,6 @@ codegen = {
     mep.MEP_INSN_SLT3: c_slt3_r0,
     mep.MEP_INSN_SLTU3: c_sltu3_r0,
     mep.MEP_INSN_MOVI16: c_mov_imm8,
-    mep.MEP_INSN_LBU: c_lbu_rm,
-    mep.MEP_INSN_LHU: c_lhu_rm,
     
     mep.MEP_INSN_SLL: c_sll_rm,
     mep.MEP_INSN_SRL: c_srl_rm,
