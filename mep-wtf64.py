@@ -446,30 +446,18 @@ def c_sw_rm(insn):
     emit("STR {}, [{}]".format(op1, op2))
 
 
-def c_sw_abs24(insn):
-    # Store4(GR(n), abs24)
+def make_load_store_abs24(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_mem
 
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_mem
+        op1 = arm_reg(insn.Op1.reg)
+        op2 = insn.Op2.addr
 
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = insn.Op2.addr
+        emit("LDR {}, =0x{:X}".format(g_tmp, op2))
+        emit("{} {}, [{}]".format(mnem, op1, g_tmp64))
 
-    emit("LDR {}, =0x{:X}".format(g_tmp, op2))
-    emit("STR {}, [{}]".format(op1, g_tmp64))
-
-
-def c_lw_abs24(insn):
-    # GR(n) = Load4(abs24)
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_mem
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = insn.Op2.addr
-
-    emit("LDR {}, =0x{:X}".format(g_tmp, op2))
-    emit("LDR {}, [{}]".format(op1, g_tmp64))
+    return inner
 
 
 def c_sb(insn):
@@ -496,51 +484,23 @@ def c_sh_rm(insn):
     emit("STRH {}, [{}]".format(op1, op2))
 
 
-def load_store_disp(asm, op1, op2, imm):
-    # Generates instruction: {asm} OP1, [OP2, #imm]
-    # with additional case when imm is out-of-range
+def make_load_store_disp16(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_imm
+        assert insn.Op3.type == o_reg
 
-    if out_of_range(imm):
-        emit("LDR {}, ={}".format(g_tmp, imm))
-        emit("{} {}, [{}, {}]".format(asm, op1, op2, g_tmp64))
-    else:
-        emit("{} {}, [{}, #{}]".format(asm, op1, op2, imm))
+        op1 = arm_reg(insn.Op1.reg)
+        imm = unsigned2signed32(insn.Op2.value)
+        op2 = arm_reg64(insn.Op3.reg)
 
+        if out_of_range(imm):
+            emit("LDR {}, ={}".format(g_tmp, imm))
+            emit("{} {}, [{}, {}]".format(mnem, op1, op2, g_tmp64))
+        else:
+            emit("{} {}, [{}, #{}]".format(mnem, op1, op2, imm))
 
-def c_sb_disp16(insn):
-    # Store1(GR(n), GR(m) + SignExt(disp16, 16, 32))
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_reg
-
-    load_store_disp("STRB", arm_reg(insn.Op1.reg), arm_reg64(insn.Op3.reg), insn.Op2.value)
-
-
-def c_lb_disp16(insn):
-    # GR(n) = SignExt(Load1(GRN(tp) + disp7), 8, 32)
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_reg
-
-    load_store_disp("LDRSB", arm_reg(insn.Op1.reg), arm_reg64(insn.Op3.reg), insn.Op2.value)
-
-
-def c_sh_disp16(insn):
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_reg
-
-    load_store_disp("STRH", arm_reg(insn.Op1.reg), arm_reg64(insn.Op3.reg), insn.Op2.value)
-
-
-def c_lh_disp16(insn):
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_imm
-    assert insn.Op3.type == o_reg
-
-    load_store_disp("LDRSH", arm_reg(insn.Op1.reg), arm_reg64(insn.Op3.reg), insn.Op2.value)
+    return inner
 
 
 def c_lw_sp(insn):
@@ -1183,38 +1143,45 @@ def c_sys(insn):
 
 
 codegen = {
-    mep.MEP_INSN_MOVH: c_movh,
-    mep.MEP_INSN_MOVU24: c_movu,
-    mep.MEP_INSN_OR3: c_or3,
+    # Repeats. These are pretty special
     mep.MEP_INSN_EREPEAT: c_erepeat,
     mep.MEP_INSN_REPEAT: c_repeat,
 
-    mep.MEP_INSN_SW24: c_sw_abs24,
-    mep.MEP_INSN_LW24: c_lw_abs24,
+    mep.MEP_INSN_MOVH: c_movh,
+    mep.MEP_INSN_MOVU24: c_movu,
+    mep.MEP_INSN_OR3: c_or3,
 
-    mep.MEP_INSN_SB16: c_sb_disp16,
-    mep.MEP_INSN_LB16: c_lb_disp16,
+    # Load/Store abs24
+    mep.MEP_INSN_SW24: make_load_store_abs24("STR"),
+    mep.MEP_INSN_LW24: make_load_store_abs24("LDR"),
 
-    mep.MEP_INSN_SH16: c_sh_disp16,
-    mep.MEP_INSN_LH16: c_lh_disp16,
+    # Load/Store disp16
+    mep.MEP_INSN_SB16: make_load_store_disp16("STRB"),
+    mep.MEP_INSN_LB16: make_load_store_disp16("LDRSB"),
+    mep.MEP_INSN_LBU16: make_load_store_disp16("LDRB"),
+    mep.MEP_INSN_SH16: make_load_store_disp16("STRH"),
+    mep.MEP_INSN_LH16: make_load_store_disp16("LDRSH"),
+    mep.MEP_INSN_LHU16: make_load_store_disp16("LDRH"),
+    mep.MEP_INSN_SW16: make_load_store_disp16("STR"),
+    mep.MEP_INSN_LW16: make_load_store_disp16("LDR"),
 
-    mep.MEP_INSN_LHU16: c_lhu_disp16,
-
-    mep.MEP_INSN_LW: c_lw_rm,
-    mep.MEP_INSN_LB: c_lb_rm,
-    mep.MEP_INSN_SB: c_sb,
-    mep.MEP_INSN_SH: c_sh_rm,
     mep.MEP_INSN_SW: c_sw_rm,
+    mep.MEP_INSN_LW: c_lw_rm,
+
+    mep.MEP_INSN_SH: c_sh_rm,
+
+    mep.MEP_INSN_SB: c_sb,
+    mep.MEP_INSN_LB: c_lb_rm,
+
     mep.MEP_INSN_LW_SP: c_lw_sp,
     mep.MEP_INSN_SW_SP: c_sw_sp,
-    mep.MEP_INSN_SW16: c_sw_disp16,
+
     mep.MEP_INSN_MOV: c_mov_rm,
     mep.MEP_INSN_MOVI8: c_mov_imm8,
     mep.MEP_INSN_RET: c_ret,
     mep.MEP_INSN_ADD3X: c_add3_imm16,
     mep.MEP_INSN_LDC_LP: c_ldc_lp,
     mep.MEP_INSN_STC_LP: c_stc_lp,
-    mep.MEP_INSN_LW16: c_lw_disp16,
 
     mep.MEP_INSN_SLT3X: c_slt3_imm16,
     mep.MEP_INSN_SLTU3X: c_sltu3_imm16,
@@ -1253,7 +1220,7 @@ codegen = {
     mep.MEP_INSN_MOVI16: c_mov_imm8,
     mep.MEP_INSN_LBU: c_lbu_rm,
     mep.MEP_INSN_LHU: c_lhu_rm,
-    mep.MEP_INSN_LBU16: c_lbu_disp16,
+    
     mep.MEP_INSN_SLL: c_sll_rm,
     mep.MEP_INSN_SRL: c_srl_rm,
     mep.MEP_INSN_SLL3: c_sll3,
