@@ -741,18 +741,6 @@ def make_logic3(mnem):
     return inner
 
 
-def c_lbu_rm(insn):
-    # GR(n) = Load1(GR(m));
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg64(insn.Op2.reg)
-
-    emit("LDRB {}, [{}]".format(op1, op2))
-
-
 def c_nor(insn):
     # GR(n) = ~(GR(n) | GR(m));
 
@@ -949,7 +937,7 @@ codegen = {
     mep.MEP_INSN_LB: make_load_store_rm("LDRSB"),
     mep.MEP_INSN_LBU: make_load_store_rm("LDRB"),
 
-    # Load/Store sp-relative
+    # Load/Store sp-relative (these are a bit different)
     mep.MEP_INSN_LW_SP: c_lw_sp,
     mep.MEP_INSN_SW_SP: c_sw_sp,
 
