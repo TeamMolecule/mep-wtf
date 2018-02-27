@@ -621,21 +621,6 @@ def make_cmp_b(mnem):
     return inner
 
 
-def c_beq(insn):
-    # if (GR(n) == GR(m)) BRA(CRN(pc) + SignExt(disp17, 17, 32) - 4);
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-    assert insn.Op3.type == o_near
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
-    lbl = use_loc(idc.GetOperandValue(insn.ip, 2))
-
-    emit("CMP {}, {}".format(op1, op2))
-    emit("BEQ {}".format(lbl))
-
-
 def c_sltu3_imm16(insn):
     # GR(n) = GR(m) < imm16
 
@@ -705,30 +690,18 @@ def c_sltu3_imm5(insn):
     emit("CSET {}, LO".format(arm_reg(1)))
 
 
-def c_sll_rm(insn):
-    # GR(n) = GR(n) << (GR(m) & 0b11111)
+def make_shift_rm(mnem):
+    def inner(insn):
+        assert insn.Op1.type == o_reg
+        assert insn.Op2.type == o_reg
 
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
+        op1 = arm_reg(insn.Op1.reg)
+        op2 = arm_reg(insn.Op2.reg)
 
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
+        emit("AND {}, {}, #0b11111".format(g_tmp, op2))
+        emit("{mnem} {0}, {0}, {1}".format(op1, g_tmp, mnem=mnem))
 
-    emit("AND {}, {}, #0b11111".format(g_tmp, op2))
-    emit("LSL {0}, {0}, {1}".format(op1, g_tmp))
-
-
-def c_srl_rm(insn):
-    # GR(n) = GR(n) >> (GR(m) & 0b11111)
-
-    assert insn.Op1.type == o_reg
-    assert insn.Op2.type == o_reg
-
-    op1 = arm_reg(insn.Op1.reg)
-    op2 = arm_reg(insn.Op2.reg)
-
-    emit("AND {}, {}, #0b11111".format(g_tmp, op2))
-    emit("LSR {0}, {0}, {1}".format(op1, g_tmp))
+    return inner
 
 
 def c_sll3(insn):
@@ -980,12 +953,16 @@ codegen = {
     mep.MEP_INSN_LW_SP: c_lw_sp,
     mep.MEP_INSN_SW_SP: c_sw_sp,
 
+    # Special arithmetics
+    mep.MEP_INSN_NOR: c_nor,
+    mep.MEP_INSN_NEG: c_neg,
+    mep.MEP_INSN_ABS: c_abs,
+
     mep.MEP_INSN_MOV: c_mov_rm,
     mep.MEP_INSN_MOVI8: c_mov_imm8,
     mep.MEP_INSN_MOVH: c_movh,
     mep.MEP_INSN_MOVU24: c_movu,
 
-    mep.MEP_INSN_RET: c_ret,
     mep.MEP_INSN_ADD3X: c_add3_imm16,
 
     # Load/Store link register
@@ -995,9 +972,7 @@ codegen = {
     mep.MEP_INSN_SLT3X: c_slt3_imm16,
     mep.MEP_INSN_SLTU3X: c_sltu3_imm16,
 
-    mep.MEP_INSN_JMP: c_jmp_rm,
-    mep.MEP_INSN_JMP24: c_jmp_target24,
-
+    # Conditional branches
     mep.MEP_INSN_BNE: make_cmp_b("BNE"),
     mep.MEP_INSN_BEQ: make_cmp_b("BEQ"),
     mep.MEP_INSN_BNEZ: make_cmpz_b("BNE"),
@@ -1007,31 +982,33 @@ codegen = {
     mep.MEP_INSN_BLTI: make_cmp_b_rin("BLT"),
     mep.MEP_INSN_BGEI: make_cmp_b_rin("BGE"),
 
+    # Jumps/branches/function calls
     mep.MEP_INSN_BSR12: c_bsr,
     mep.MEP_INSN_BSR24: c_bsr,
     mep.MEP_INSN_JSR: c_jsr,
-
+    mep.MEP_INSN_JMP: c_jmp_rm,
+    mep.MEP_INSN_JMP24: c_jmp_target24,
     mep.MEP_INSN_BRA: c_bra,
+
     mep.MEP_INSN_ADD3: c_add3_rl,
     mep.MEP_INSN_ADD3I: c_add3_sp,
     mep.MEP_INSN_SLT3: c_slt3_r0,
     mep.MEP_INSN_SLTU3: c_sltu3_r0,
     mep.MEP_INSN_MOVI16: c_mov_imm8,
     
-    mep.MEP_INSN_SLL: c_sll_rm,
-    mep.MEP_INSN_SRL: c_srl_rm,
+    # Shift with reg as operand
+    mep.MEP_INSN_SLL: make_shift_rm("LSL"),
+    mep.MEP_INSN_SRL: make_shift_rm("LSR"),
+
     mep.MEP_INSN_SLL3: c_sll3,
-    mep.MEP_INSN_NOR: c_nor,
     mep.MEP_INSN_SLTU3I: c_sltu3_imm5,
-    mep.MEP_INSN_NEG: c_neg,
 
     mep.MEP_INSN_EXTB: make_ext("SXTB"),
     mep.MEP_INSN_EXTUB: make_ext("UXTB"),
     mep.MEP_INSN_EXTH: make_ext("SXTH"),
     mep.MEP_INSN_EXTUH: make_ext("UXTH"),
 
-
-    mep.MEP_INSN_ABS: c_abs,
+    mep.MEP_INSN_RET: c_ret,
 
     # System instructions we can't support
     mep.MEP_INSN_STC_HI: c_sys,
