@@ -13,5 +13,8 @@ Prototypes for functions:
 
 Note that the args past fourth are passed on stack. We pretend that they are int64_t's, but it's actually two separate args.
 
-Compile:
-	aarch64-linux-gnu-as test.asm -o f00d_169.o -c && aarch64-linux-gnu-ld f00d_169.o -o f00d_169.elf -Ttext=0x900000
+Compile secure_kernel:
+	aarch64-linux-gnu-as test.asm -o file.o -c && aarch64-linux-gnu-ld file.o -o f00d_169.elf -Ttext=0x900000
+
+Compile an sm module:
+	aarch64-linux-gnu-as test.asm -o file.o -c && aarch64-linux-gnu-ld file.o -o sm.elf -Ttext=0x9B0000
