@@ -677,6 +677,19 @@ def c_slt3_r0(insn):
     emit("CSET {}, LT".format(arm_reg(1)))
 
 
+def c_slt3_imm5(insn):
+    # GRN(r0) = (int32_t)GR(n) < imm5;
+
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("CMP {}, #{}".format(op1, imm))
+    emit("CSET {}, LT".format(arm_reg(1)))
+
+
 def c_sltu3_imm5(insn):
     # GRN(r0) = GR(n) < imm5
 
@@ -957,6 +970,7 @@ codegen = {
     mep.MEP_INSN_LDC_LP: c_ldc_lp,
     mep.MEP_INSN_STC_LP: c_stc_lp,
 
+    mep.MEP_INSN_SLT3I: c_slt3_imm5,
     mep.MEP_INSN_SLT3X: c_slt3_imm16,
     mep.MEP_INSN_SLTU3X: c_sltu3_imm16,
 
@@ -989,6 +1003,7 @@ codegen = {
     mep.MEP_INSN_SRL: make_shift_rm("LSR"),
 
     mep.MEP_INSN_SLL3: c_sll3,
+
     mep.MEP_INSN_SLTU3I: c_sltu3_imm5,
 
     # Unsigned/signed extends
