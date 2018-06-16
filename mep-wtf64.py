@@ -962,6 +962,7 @@ codegen = {
     mep.MEP_INSN_MOV: c_mov_rm,
     mep.MEP_INSN_MOVI8: c_mov_imm8,
     mep.MEP_INSN_MOVH: c_movh,
+    mep.MEP_INSN_MOVU16: c_movu,
     mep.MEP_INSN_MOVU24: c_movu,
 
     mep.MEP_INSN_ADD3X: c_add3_imm16,
