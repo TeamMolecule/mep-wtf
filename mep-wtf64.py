@@ -564,13 +564,13 @@ def c_bsr(insn):
 def c_ldc_lp(insn):
     assert insn.Op1.type == o_reg
     op1 = arm_reg64(insn.Op1.reg)
-    emit("MOV {}, LR".format(op1))
+    emit("MOV {}, X30".format(op1))
 
 
 def c_stc_lp(insn):
     assert insn.Op1.type == o_reg
     op1 = arm_reg64(insn.Op1.reg)
-    emit("MOV LR, {}".format(op1))
+    emit("MOV X30, {}".format(op1))
 
 
 def make_cmpz_b(mnem):
@@ -811,6 +811,9 @@ def c_add3_rl(insn):
     op1 = arm_reg(insn.Op1.reg)
     op2 = arm_reg(insn.Op2.reg)
     op3 = arm_reg(insn.Op3.reg)
+
+    if op2 == "SP":
+        op1 = arm_reg64(insn.Op1.reg)
 
     emit("ADD {}, {}, {}".format(op1, op2, op3))
 
