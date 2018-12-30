@@ -8,6 +8,7 @@
 
 
 import idc
+import idaapi
 import idautils
 import string
 from idaapi import o_reg, o_imm
@@ -359,7 +360,7 @@ def unsigned2signed32(val):
 
 
 def out_of_range(val):
-    return val >= 2 ** 11 or val <= -(2 ** 11)
+    return val >= 2 ** 11 or val <= -(2 ** 11) or val == -0x400
 
 
 def c_xor(insn):
@@ -440,6 +441,66 @@ def c_lw_sp(insn):
         emit("MOV SP, {}".format(g_tmp64))
     else:
         emit("LDR {}, [SP, #{}]".format(op1, imm))
+
+
+def c_lw_tp(insn):
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("LDR {}, [{}, #{}]".format(op1, arm_reg64(14), imm))
+
+
+def c_sw_tp(insn):
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("STR {}, [{}, #{}]".format(op1, arm_reg64(14), imm))
+
+
+def c_sh_tp(insn):
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("STRH {}, [{}, #{}]".format(op1, arm_reg64(14), imm))
+
+
+def c_sb_tp(insn):
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("STRB {}, [{}, #{}]".format(op1, arm_reg64(14), imm))
+
+
+def c_lhu_tp(insn):
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("LDRH {}, [{}, #{}]".format(op1, arm_reg64(14), imm))
+
+
+def c_lbu_tp(insn):
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_imm
+
+    op1 = arm_reg(insn.Op1.reg)
+    imm = insn.Op2.value
+
+    emit("LDRH {}, [{}, #{}]".format(op1, arm_reg64(14), imm))
 
 
 def c_sw_sp(insn):
@@ -632,8 +693,14 @@ def c_sltu3_imm16(insn):
     op2 = arm_reg(insn.Op2.reg)
     imm = insn.Op3.value
 
-    emit("CMP {}, #{}".format(op2, imm))
-    emit("CSET {}, LO".format(op1))
+    # seen on 3.60, TODO: better workaround
+    if imm == 0x3600:
+        emit("LDR {}, =0x{:08X}".format(g_tmp, imm))
+        emit("CMP {}, {}".format(op2, g_tmp))
+        emit("CSET {}, LO".format(op1))
+    else:
+        emit("CMP {}, #{}".format(op2, imm))
+        emit("CSET {}, LO".format(op1))
 
 
 def c_slt3_imm16(insn):
@@ -865,6 +932,19 @@ def c_abs(insn):
     emit("CSNEG {0}, {0}, {0}, PL".format(op1))
 
 
+def c_sl2ad3(insn):
+    assert insn.Op1.type == o_reg
+    assert insn.Op2.type == o_reg
+
+    op1 = arm_reg(insn.Op1.reg)
+    op2 = arm_reg(insn.Op2.reg)
+    dst = arm_reg(1)
+
+    emit("LSL {}, {}, #2".format(g_tmp, op1))
+    emit("ADD {0}, {0}, {1}".format(g_tmp, op2))
+    emit("MOV {}, {}".format(dst, g_tmp))
+
+
 rpb = 0
 rpe = 0
 is_erepeat = False
@@ -953,6 +1033,13 @@ codegen = {
     mep.MEP_INSN_LB: make_load_store_rm("LDRSB"),
     mep.MEP_INSN_LBU: make_load_store_rm("LDRB"),
 
+    mep.MEP_INSN_LW_TP: c_lw_tp,
+    mep.MEP_INSN_LHU_TP: c_lhu_tp,
+    mep.MEP_INSN_LBU_TP: c_lbu_tp,
+    mep.MEP_INSN_SW_TP: c_sw_tp,
+    mep.MEP_INSN_SH_TP: c_sh_tp,
+    mep.MEP_INSN_SB_TP: c_sb_tp,
+
     # Load/Store sp-relative (these are a bit different)
     mep.MEP_INSN_LW_SP: c_lw_sp,
     mep.MEP_INSN_SW_SP: c_sw_sp,
@@ -1015,6 +1102,8 @@ codegen = {
     mep.MEP_INSN_EXTUB: make_ext("UXTB"),
     mep.MEP_INSN_EXTH: make_ext("SXTH"),
     mep.MEP_INSN_EXTUH: make_ext("UXTH"),
+
+    mep.MEP_INSN_SL2AD3: c_sl2ad3,
 
     mep.MEP_INSN_RET: c_ret,
 
@@ -1099,6 +1188,8 @@ for item in output:
     if isinstance(item, Loc) and item.s in used_locs:
         s += format_loc(item.s) + ":\n"
 
-
-with open("F:/test.asm", "w") as fout:
+output_path = idaapi.cvar.database_idb + ".asm"
+with open(output_path, "w") as fout:
     fout.write(s)
+
+print("Output written to {}".format(output_path))
