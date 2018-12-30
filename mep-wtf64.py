@@ -1,9 +1,5 @@
 #
-# Copyright 2018 molecule. All rights reserved.
-#
-# This software is intellectual property of molecule.
-# You may not copy, republish, display, distribute, transmit, sell, rent, lease, loan
-# or otherwise make available in any form or by any means all or any portion of this software.
+# MIT license. See LICENSE for details.
 #
 
 
