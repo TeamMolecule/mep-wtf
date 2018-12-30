@@ -1,3 +1,5 @@
+mep-wtf works by translating MeP code to aarch64 assembly. Since the ABI differs between these architectures, you need to manually set function prototypes.
+
 Prototypes for functions:
 	int __usercall ZeroArgs@<W4>()
 	int __usercall OneArg@<W4>(__int64 a1@<X0>)
